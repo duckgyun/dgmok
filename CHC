@@ -1,0 +1,312 @@
+import sys
+from PyQt5.QtWidgets import *
+from PyQt5 import uic
+from PyQt5 import QtCore, QtGui, QtWidgets
+
+import os
+import openpyxl
+import pandas as pd
+import datetime
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+import warnings
+warnings.filterwarnings(action='ignore')
+
+
+
+
+#UI파일 연결
+#단, UI파일은 Python 코드 파일과 같은 디렉토리에 위치
+#자신이 가지고 있는 UI의 이름으로 수정
+form_class = uic.loadUiType("CHC_ver_1.ui")[0]
+
+#화면을 띄우는데 사용되는 Class 선언
+class WindowClass(QMainWindow, form_class) :
+    def __init__(self) :
+        super().__init__()
+        self.setupUi(self)
+        
+        #버튼에 기능을 연결하는 코드
+        self.pushButton_retention1.clicked.connect(self.savefolder)
+        self.pushButton_retention2.clicked.connect(self.handle_button_click)
+
+    def handle_button_click(self):
+        self.get_input1()
+        self.folderload_and_analysis()
+
+    def get_input1(self):
+        global input_list, user_input, user_input1, user_input2
+        user_input = self.lineEdit_1.text()
+        print("패턴",user_input)
+        user_input1 = self.lineEdit_2.text()
+        user_input2 = self.lineEdit_3.text()
+
+        input_list = [int(num) for num in user_input.split(',')]
+        print("상온 패턴:",input_list[0],"고온 패턴:",input_list[1])
+
+    def my_exception_hook(exctype, value, traceback):
+        # Print the error and traceback
+        print(exctype, value, traceback)
+        # Call the normal Exception hook after
+        sys._excepthook(exctype, value, traceback)
+        # sys.exit(1)
+    # Back up the reference to the exceptionhook
+        sys._excepthook = sys.excepthook
+    # Set the exception hook to our wrapping function
+        sys.excepthook = my_exception_hook
+
+    def savefolder(self):
+        global path_dir_save
+        path_dir_save = QFileDialog.getExistingDirectory(self, "Select Directory")
+        print("저장 폴더 :" + path_dir_save)
+        print("btn_1 Clicked")
+
+    def folderload_and_analysis(self):
+        global path_dir
+        path_dir = QFileDialog.getExistingDirectory(self, "Select Directory")
+        print(path_dir)
+        #self.tlb1.setText(path_dir)
+        for root1, dirs1, files1 in os.walk(path_dir):
+            break
+        print("선택 폴더 :")
+        print(dirs1)
+
+        wb = openpyxl.load_workbook('./test1.xlsx')
+        sheet1 = wb.get_sheet_by_name('용량')
+        sheet2 = wb.get_sheet_by_name('수명용량')
+        sheet3 = wb.get_sheet_by_name('그래프')
+        sheet4 = wb.get_sheet_by_name('수명저항')
+        sheet5 = wb.get_sheet_by_name('수명정리')
+
+        #print("상온 lot 입력하세요")
+        #name1 = sys.stdin.readline().strip()
+        #print("고온 lot 입력하세요")
+        #name2 = sys.stdin.readline().strip()
+
+        select_cycles = [sheet2.cell(row=4, column=1).value - 1]
+        for i in range(10):
+            if sheet2.cell(row=5 + i, column=1).value:
+                select_cycles = select_cycles + [sheet2.cell(row=5 + i, column=1).value - 1]
+
+        for root1, dirs1, files1 in os.walk(path_dir):
+            break
+        dirnum_DCIR = -1
+        dirnum_HTC = -1
+        for val_dir1 in dirs1:
+            dir_name = val_dir1
+            if dir_name.find('HTC') > 0 or dir_name.find(user_input2):
+                dirnum_HTC = dirnum_HTC + 1
+                for root2, dirs2, files2 in os.walk(os.path.join(root1, val_dir1)):
+                    break
+                celnum = -1
+                dirs2 = sorted(dirs2)
+                for val_dir2 in dirs2:
+                    celnum = celnum + 1
+                    cyclenum = 0
+                    sci = 0
+
+                    file_list = os.listdir(os.path.join(root2, val_dir2))
+
+                    # 패턴 load
+                    if os.path.isfile(os.path.join(root2, val_dir2) + '/' + dir_name + '.PTN'):
+                        ptn_arr = np.loadtxt(os.path.join(root2, val_dir2) + '/' + dir_name + '.PTN', dtype='str',
+                                             delimiter=',')
+                        # print(ptn_arr)
+                        mass = float(ptn_arr[0].split()[int(input_list[1])])
+                        print("고온무게", mass)
+                    else:
+                        print(os.path.join(root2, val_dir2) + '/' + dir_name + '.PTN' + "파일이 없습니다.")
+                        break
+
+                    for file in file_list:
+                        if file.isalnum():
+                            cyclenum = cyclenum + 1
+                    file_list = sorted(file_list)
+                    # 데이터 load
+                    for f_i in range(cyclenum):
+                        df = pd.read_csv(os.path.join(root2, val_dir2) + '/' + file_list[f_i], sep=',', index_col=1,
+                                         skiprows=[0, 0])
+                        df = df.dropna(axis='columns')
+                        # df = df.drop([df.columns[0]], axis='columns')
+                        # 용량 계산
+
+                        df["t1"] = df.shift(1)["PassTime[Sec]"]
+                        df["c1"] = df.shift(1)["Current[mA]"]
+                        df["Specific capacity"] = (df["PassTime[Sec]"] - df["t1"]) * df["Current[mA]"] / 3600 / mass
+                        df_disch = df[df["Condition"].isin([2])]
+                        if df_disch["PassTime[Sec]"].shape[0] > 100:
+                            # 저항 계산
+                            for i in range(100):
+                                if df_disch["PassTime[Sec]"][i] >= 60:
+                                    a = df_disch["Voltage[V]"][i - 1]
+                                    b = df_disch["Voltage[V]"][i]
+                                    x = df_disch["PassTime[Sec]"][i - 1]
+                                    y = df_disch["PassTime[Sec]"][i]
+                                    v0 = df_disch["Voltage[V]"][0]
+                                    ic = df_disch["Current[mA]"][i]
+                                    disch_res = (v0 - (a + (b - a) * (60 - x) / (y - x))) * 1000 / ic
+                                    break
+                            disch_capa = df_disch["Specific capacity"].sum()
+                            sheet2.cell(row=32 + f_i, column=dirnum_HTC * 5 + celnum + 2).value = disch_capa
+                            sheet4.cell(row=32 + f_i, column=dirnum_HTC * 5 + celnum + 2).value = disch_res
+                            if f_i == 0:
+                                sheet2.cell(row=1, column=dirnum_HTC * 5 + 2).value = str(dir_name)
+                                sheet4.cell(row=1, column=dirnum_HTC * 5 + 2).value = str(dir_name)
+                                # sheet5.cell(row=dirnum_HTC+3, column=1).value = str(dir_name)
+                            if f_i in select_cycles:
+                                sheet2.cell(row=4 + sci, column=dirnum_HTC * 5 + celnum + 2).value = disch_capa
+                                fix_disch_capa = sheet2.cell(row=4, column=dirnum_HTC * 5 + celnum + 2).value
+                                sheet2.cell(row=18 + sci,
+                                            column=dirnum_HTC * 5 + celnum + 2).value = disch_capa / fix_disch_capa * 100
+                                # sheet5.cell(row=dirnum_HTC + 3, column=2 + sci).value = disch_capa / fix_disch_capa * 100
+
+                                sheet4.cell(row=4 + sci, column=dirnum_HTC * 5 + celnum + 2).value = disch_res
+                                fix_disch_res = sheet4.cell(row=4, column=dirnum_HTC * 5 + celnum + 2).value
+                                sheet4.cell(row=18 + sci,
+                                            column=dirnum_HTC * 5 + celnum + 2).value = disch_res / fix_disch_res * 100
+                                sci = sci + 1
+
+            if dir_name.find('Crate') > 0 :#or dir_name.find(user_input1):
+                print(dir_name)
+                dirnum_DCIR = dirnum_DCIR + 1
+                for root2, dirs2, files2 in os.walk(os.path.join(root1, val_dir1)):
+                    break
+
+                celnum = -1
+                dirs2 = sorted(dirs2)
+                for val_dir2 in dirs2:
+                    celnum = celnum + 1
+                    cyclenum = 0
+                    file_list = os.listdir(os.path.join(root2, val_dir2))
+
+                    # 패턴 load
+                    if os.path.isfile(os.path.join(root2, val_dir2) + '/' + dir_name + '.PTN'):
+                        ptn_arr = np.loadtxt(os.path.join(root2, val_dir2) + '/' + dir_name + '.PTN', dtype='str',
+                                             delimiter=',')
+                        mass = float(ptn_arr[0].split()[input_list[0]])
+                        mass_ref = float(ptn_arr[1].split()[6]) / 10
+                        print("상온무게", mass)
+
+                    else:
+                        print(os.path.join(root2, val_dir2) + '/' + dir_name + '.PTN' + "파일이 없습니다.")
+                        break
+
+                    for file in file_list:
+                        if file.isalnum():
+                            if float(ptn_arr[cyclenum + 1].split()[1]):
+                                if cyclenum + 1 > 3 and float(ptn_arr[cyclenum + 1].split()[1]) == 0:
+                                    break
+                                cyclenum = cyclenum + 1
+                    # 데이터 load
+                    file_list = sorted(file_list)
+                    for f_i in range(cyclenum):
+                        ch_current = float(ptn_arr[f_i + 1].split()[1])
+                        ch_c_rate = ch_current / (mass_ref * 200)
+                        df = pd.read_csv(os.path.join(root2, val_dir2) + '/' + file_list[f_i], sep=',', index_col=1,
+                                         skiprows=[0, 0])
+
+                        dch_current = float(ptn_arr[f_i + 1].split()[34])
+                        dch_c_rate = dch_current / (mass_ref * 200)
+
+                        df = pd.read_csv(os.path.join(root2, val_dir2) + '/' + file_list[f_i], sep=',', index_col=1,
+                                         skiprows=[0, 0])
+                        df = df.dropna(axis='columns')
+                        # df = df.drop([df.columns[0]], axis='columns')
+
+                        # 용량 계산
+                        df["t1"] = df.shift(1)["PassTime[Sec]"]
+                        df["c1"] = df.shift(1)["Current[mA]"]
+                        df["Specific capacity"] = (df["PassTime[Sec]"] - df["t1"]) * (
+                                df["c1"] + df["Current[mA]"]) / 7200 / mass
+                        df_ch = df[df["Condition"].isin([1])]
+                        df_disch = df[df["Condition"].isin([2])]
+                        if df_ch["PassTime[Sec]"].shape[0] > 0 and df_disch["PassTime[Sec]"].shape[0] > 0:
+                            df_ch["Specific capacity"][0] = 0
+                            df_disch["Specific capacity"][0] = 0
+
+                            # 저항 계산
+                            for i in range(100):
+                                if df_disch["PassTime[Sec]"][i] >= 60:
+                                    a = df_disch["Voltage[V]"][i - 1]
+                                    b = df_disch["Voltage[V]"][i]
+                                    x = df_disch["PassTime[Sec]"][i - 1]
+                                    y = df_disch["PassTime[Sec]"][i]
+                                    v0 = df_disch["Voltage[V]"][0]
+                                    ic = df_disch["Current[mA]"][i]
+                                    disch_res_new = (v0 - (a + (b - a) * (60 - x) / (y - x))) * 1000 / ic
+                                    break
+                            for i in range(100):
+                                if df_disch["PassTime[Sec]"][i] >= df_disch["PassTime[Sec]"][1] + 60:
+                                    a = df_disch["Voltage[V]"][i - 1]
+                                    b = df_disch["Voltage[V]"][i]
+                                    x = df_disch["PassTime[Sec]"][i - 1]
+                                    y = df_disch["PassTime[Sec]"][i]
+                                    in_time = df_disch["PassTime[Sec]"][1] + 60
+                                    Vmax = df_disch["Voltage[V]"].max()
+                                    ic = df_disch["Current[mA]"][i]
+                                    disch_res_old = (Vmax - (a + (b - a) * (in_time - x) / (y - x))) * 1000 / ic
+                                    break
+
+                            ch_capa = df_ch["Specific capacity"].sum()
+                            disch_capa = df_disch["Specific capacity"].sum()
+                            sheet1.cell(row=dirnum_DCIR * 11 + f_i + 4, column=1).value = ch_c_rate
+                            sheet1.cell(row=dirnum_DCIR * 11 + f_i + 4, column=8).value = dch_c_rate
+                            sheet1.cell(row=dirnum_DCIR * 11 + f_i + 4, column=celnum + 2).value = ch_capa
+                            sheet1.cell(row=dirnum_DCIR * 11 + f_i + 4, column=celnum + 9).value = disch_capa
+                            sheet1.cell(row=dirnum_DCIR * 11 + 1, column=1).value = dir_name
+                            print(ch_c_rate, dch_c_rate, ch_capa, disch_capa, '상온', mass, dir_name)
+                            # graph 옮기기
+                            if f_i == 0:
+                                ch_sum = 0
+                                dch_sum = 0
+                                sheet3.cell(row=1, column=dirnum_DCIR * 20 + celnum * 4 + 1).value = str(
+                                    dir_name + '_cell' + str(celnum))
+                                sheet1.cell(row=dirnum_DCIR * 11 + celnum + 4, column=25).value = disch_res_old
+                                sheet1.cell(row=dirnum_DCIR * 11 + celnum + 4, column=26).value = disch_res_new
+
+                                for i in range(len(df_ch["Specific capacity"])):
+                                    ch_sum = ch_sum + df_ch["Specific capacity"][i]
+                                    sheet3.cell(row=i + 3, column=dirnum_DCIR * 20 + celnum * 4 + 1).value = ch_sum
+                                    sheet3.cell(row=i + 3, column=dirnum_DCIR * 20 + celnum * 4 + 2).value = \
+                                        df_ch["Voltage[V]"][i]
+                                for i in range(len(df_disch["Specific capacity"])):
+                                    dch_sum = dch_sum + df_disch["Specific capacity"][i]
+                                    sheet3.cell(row=i + 3, column=dirnum_DCIR * 20 + celnum * 4 + 3).value = dch_sum
+                                    sheet3.cell(row=i + 3, column=dirnum_DCIR * 20 + celnum * 4 + 4).value = \
+                                        df_disch["Voltage[V]"][i]
+                print(dir_name)
+
+        for i in range(dirnum_HTC + 1):
+            for j in range(11):
+                ave_capa = 0
+                ave_res = 0
+                celnca = 0
+                celnre = 0
+                for k in range(3):
+                    if sheet2.cell(row=18 + j, column=k + i * 3 + 2).value:
+                        celnca = celnca + 1
+                        ave_capa_temp = sheet2.cell(row=18 + j, column=k + i * 3 + 2).value
+                        ave_capa = ave_capa + ave_capa_temp
+                    if sheet4.cell(row=18 + j, column=k + i * 3 + 2).value:
+                        celnre = celnre + 1
+                        ave_res_temp = sheet4.cell(row=18 + j, column=k + i * 3 + 2).value
+                        ave_res = ave_res + ave_res_temp
+                if celnca > 0 and celnre > 0:
+                    sheet5.cell(row=i + 3, column=j + 2).value = ave_capa / celnca
+                    sheet5.cell(row=i + 3, column=j + 13).value = ave_res / celnre
+
+        now = datetime.datetime.now()
+        wb.save(path_dir_save + '/result' + str(now.minute) + str(now.second) + '.xlsx')
+        print("분석 종료. 결과파일 저장완료")
+        print("결과파일:" + path_dir_save + '/result' + str(now.minute) + str(now.second) + '.xlsx')
+
+if __name__ == "__main__" :
+    #QApplication : 프로그램을 실행시켜주는 클래스
+    app = QApplication(sys.argv) 
+    #WindowClass의 인스턴스 생성
+    myWindow = WindowClass()
+    #프로그램 화면을 보여주는 코드
+    myWindow.show()
+    #프로그램을 이벤트루프로 진입시키는(프로그램을 작동시키는) 코드
+    app.exec_()
