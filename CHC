@@ -1,4 +1,5 @@
 import sys
+import re
 from PyQt5.QtWidgets import *
 from PyQt5 import uic
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -9,6 +10,7 @@ import pandas as pd
 import datetime
 import seaborn as sns
 import matplotlib.pyplot as plt
+import numpy as np
 
 import warnings
 warnings.filterwarnings(action='ignore')
@@ -19,7 +21,7 @@ warnings.filterwarnings(action='ignore')
 #UI파일 연결
 #단, UI파일은 Python 코드 파일과 같은 디렉토리에 위치
 #자신이 가지고 있는 UI의 이름으로 수정
-form_class = uic.loadUiType("CHC_ver_1.ui")[0]
+form_class = uic.loadUiType("CHC_ver_2.ui")[0]
 
 #화면을 띄우는데 사용되는 Class 선언
 class WindowClass(QMainWindow, form_class) :
@@ -37,13 +39,13 @@ class WindowClass(QMainWindow, form_class) :
 
     def get_input1(self):
         global input_list, user_input, user_input1, user_input2
-        user_input = self.lineEdit_1.text()
-        print("패턴",user_input)
+        #user_input = self.lineEdit_1.text()
+        #print("패턴",user_input)
         user_input1 = self.lineEdit_2.text()
         user_input2 = self.lineEdit_3.text()
 
-        input_list = [int(num) for num in user_input.split(',')]
-        print("상온 패턴:",input_list[0],"고온 패턴:",input_list[1])
+        #input_list = [int(num) for num in user_input.split(',')]
+        #print("상온 패턴:",input_list[0],"고온 패턴:",input_list[1])
 
     def my_exception_hook(exctype, value, traceback):
         # Print the error and traceback
@@ -113,7 +115,7 @@ class WindowClass(QMainWindow, form_class) :
                         ptn_arr = np.loadtxt(os.path.join(root2, val_dir2) + '/' + dir_name + '.PTN', dtype='str',
                                              delimiter=',')
                         # print(ptn_arr)
-                        mass = float(ptn_arr[0].split()[int(input_list[1])])
+                        mass = float([word for word in ptn_arr[0].split() if '0.' in word][0])
                         print("고온무게", mass)
                     else:
                         print(os.path.join(root2, val_dir2) + '/' + dir_name + '.PTN' + "파일이 없습니다.")
@@ -167,7 +169,7 @@ class WindowClass(QMainWindow, form_class) :
                                             column=dirnum_HTC * 5 + celnum + 2).value = disch_res / fix_disch_res * 100
                                 sci = sci + 1
 
-            if dir_name.find('Crate') > 0 :#or dir_name.find(user_input1):
+            if dir_name.find('Crate') > 0 or dir_name.find(user_input1):
                 print(dir_name)
                 dirnum_DCIR = dirnum_DCIR + 1
                 for root2, dirs2, files2 in os.walk(os.path.join(root1, val_dir1)):
@@ -184,7 +186,8 @@ class WindowClass(QMainWindow, form_class) :
                     if os.path.isfile(os.path.join(root2, val_dir2) + '/' + dir_name + '.PTN'):
                         ptn_arr = np.loadtxt(os.path.join(root2, val_dir2) + '/' + dir_name + '.PTN', dtype='str',
                                              delimiter=',')
-                        mass = float(ptn_arr[0].split()[input_list[0]])
+
+                        mass = float([word for word in ptn_arr[0].split() if '0.' in word][0])
                         mass_ref = float(ptn_arr[1].split()[6]) / 10
                         print("상온무게", mass)
 
@@ -256,6 +259,7 @@ class WindowClass(QMainWindow, form_class) :
                             sheet1.cell(row=dirnum_DCIR * 11 + f_i + 4, column=celnum + 9).value = disch_capa
                             sheet1.cell(row=dirnum_DCIR * 11 + 1, column=1).value = dir_name
                             print(ch_c_rate, dch_c_rate, ch_capa, disch_capa, '상온', mass, dir_name)
+
                             # graph 옮기기
                             if f_i == 0:
                                 ch_sum = 0
@@ -275,6 +279,10 @@ class WindowClass(QMainWindow, form_class) :
                                     sheet3.cell(row=i + 3, column=dirnum_DCIR * 20 + celnum * 4 + 3).value = dch_sum
                                     sheet3.cell(row=i + 3, column=dirnum_DCIR * 20 + celnum * 4 + 4).value = \
                                         df_disch["Voltage[V]"][i]
+
+
+
+
                 print(dir_name)
 
         for i in range(dirnum_HTC + 1):
